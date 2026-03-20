@@ -251,6 +251,220 @@ Standard boilerplate — rarely needs changes:
 | `self-collision` at start | Missing `disable_collisions` in SRDF | Add the reported link pair to SRDF disable_collisions |
 | `edit_waypoints service not available` | waypoints.yaml is empty or invalid | Initialize with a valid YAML list (at least one waypoint) |
 | Teleop jog doesn't work | joint_jog.yaml points to wrong controller | Set `controllers: ['joint_velocity_controller']` |
+| `KDLKinematicsPlugin failed to load` | MoveIt Pro uses `PoseIKPlugin`, not KDL | Change kinematics.yaml solver to `pose_ik_plugin/PoseIKPlugin` |
+| `sensor_frame` parameter deprecated | JTAC config uses old param names | Use `sensor_frames: ["link"]` and `ee_frames: ["link"]` (plural, array) |
+
+---
+
+## Part 1b: Adding an End Effector (Gripper)
+
+This section covers attaching a gripper to an existing arm config. The Robotiq 2F-85 is used as the reference, but the pattern applies to any end effector.
+
+### Overview of Changes
+
+Adding a gripper touches **every layer** of the config:
+
+| File | What to add |
+|------|-------------|
+| `package.xml` | Dependency on gripper description package |
+| `description/<robot>.urdf.xacro` | Include gripper macro, attach to tool flange, add `grasp_link` |
+| `config/moveit/<robot>.srdf` | Gripper group, end effector definition, open/close states, passive joints, collision pairs |
+| `config/control/<robot>_ros2_control.yaml` | Gripper controller in controller_manager + params |
+| `config/config.yaml` | Gripper controller in `controllers_active_at_startup`, `urdf_params` for fake hardware |
+| `objectives/` | Open/close gripper objectives |
+
+### Step 1: Add Gripper Description Dependency
+
+The gripper's URDF package must be available in your workspace. For `robotiq_description`:
+- Add as a git submodule, or
+- Symlink from another workspace (works for dev, not for Docker release builds), or
+- Clone directly into `src/`
+
+Add to `package.xml`:
+```xml
+<exec_depend>robotiq_description</exec_depend>
+```
+
+### Step 2: Attach Gripper in URDF XACRO
+
+Include the gripper macro and attach it to the arm's tool flange link:
+
+```xml
+<!-- Robotiq 2F-85 Gripper -->
+<xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro" />
+
+<xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix=""
+    parent="wrist3_link"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    include_ros2_control="true"
+    com_port="/dev/ttyUSB0">
+    <origin xyz="0 0 0" rpy="0 0 ${pi}" />
+</xacro:robotiq_gripper>
+```
+
+**Key parameters:**
+- `parent` — Your arm's tool flange link (e.g., `wrist3_link`, `tool0`, `fts_link`)
+- `origin` — **Almost always needs a 180° Z rotation** (`rpy="0 0 ${pi}"`). Most gripper URDF macros (including Robotiq) define their Z axis pointing into the mounting flange. Without this rotation the fingers will point back toward the arm. **Always start with `rpy="0 0 ${pi}"` and visually verify in the 3D view after building.**
+- `origin` Z offset — The `xyz` Z value must offset the gripper to the arm's **flange face**. Many arm URDFs place the last link's origin at the joint, not at the flange surface. If the gripper appears embedded inside the wrist, add a Z offset. Check the arm's URDF: look at the last link's inertial origin Z (center of mass) and visual mesh to estimate where the flange face is. For example, if `wrist3_link` has an inertial Z of ~0.076m, the flange face is likely around `0.09-0.10m`. **Always visually verify there is no overlap or gap between the gripper base and the arm wrist.**
+- `use_fake_hardware` — Pass through from config.yaml for sim/real switching
+- `prefix` — Use `""` for single-arm setups; use a prefix for dual-arm
+
+**Add a grasp link** — a planning frame offset from the gripper base to represent the grasp point:
+
+```xml
+<link name="grasp_link" />
+<joint name="grasp_link_joint" type="fixed">
+    <parent link="robotiq_85_base_link" />
+    <child link="grasp_link" />
+    <origin xyz="0 0 0.15" rpy="0 0 0" />
+</joint>
+```
+
+The 0.15m offset is typical for the 2F-85 — adjust based on your gripper's actual grasp point.
+
+### Step 3: Update SRDF
+
+Add these sections to the SRDF:
+
+**Gripper planning group** — includes all gripper joints:
+```xml
+<group name="gripper">
+    <link name="grasp_link"/>
+    <joint name="robotiq_85_base_joint"/>
+    <joint name="robotiq_85_left_knuckle_joint"/>
+    <joint name="robotiq_85_right_knuckle_joint"/>
+    <joint name="robotiq_85_left_finger_joint"/>
+    <joint name="robotiq_85_right_finger_joint"/>
+    <joint name="robotiq_85_left_inner_knuckle_joint"/>
+    <joint name="robotiq_85_right_inner_knuckle_joint"/>
+    <joint name="robotiq_85_left_finger_tip_joint"/>
+    <joint name="robotiq_85_right_finger_tip_joint"/>
+</group>
+```
+
+**Named gripper states** — for open/close:
+```xml
+<group_state name="open" group="gripper">
+    <joint name="robotiq_85_left_knuckle_joint" value="0.7929"/>
+    <joint name="robotiq_85_right_knuckle_joint" value="0.7929"/>
+</group_state>
+<group_state name="close" group="gripper">
+    <joint name="robotiq_85_left_knuckle_joint" value="0"/>
+    <joint name="robotiq_85_right_knuckle_joint" value="0"/>
+</group_state>
+```
+
+**End effector definition** — links gripper to arm:
+```xml
+<end_effector name="gripper" parent_link="wrist3_link" group="gripper"/>
+```
+
+**Passive joints** — mimic-driven joints that MoveIt should not plan for:
+```xml
+<passive_joint name="robotiq_85_left_inner_knuckle_joint"/>
+<passive_joint name="robotiq_85_right_inner_knuckle_joint"/>
+<passive_joint name="robotiq_85_left_finger_tip_joint"/>
+<passive_joint name="robotiq_85_right_finger_tip_joint"/>
+```
+
+**Collision pairs** — disable self-collision between gripper links and between gripper and arm wrist:
+- All adjacent gripper link pairs
+- Gripper links that are close but never collide
+- `wrist3_link` (or your tool flange) ↔ gripper base and nearby gripper links
+- `wrist2_link` ↔ gripper base (if close)
+
+### Step 4: Add Gripper Controller
+
+In `config/control/<robot>_ros2_control.yaml`:
+
+**Register in controller_manager:**
+```yaml
+robotiq_gripper_controller:
+  type: position_controllers/GripperActionController
+```
+
+**Add controller parameters:**
+```yaml
+robotiq_gripper_controller:
+  ros__parameters:
+    default: true
+    joint: robotiq_85_left_knuckle_joint
+    allow_stalling: true
+    stall_timeout: 0.05
+    goal_tolerance: 0.02
+```
+
+The gripper controller only commands `robotiq_85_left_knuckle_joint` — all other gripper joints mimic it.
+
+### Step 5: Update config.yaml
+
+Add gripper controller to active startup:
+```yaml
+controllers_active_at_startup:
+  - "joint_state_broadcaster"
+  - "fairino5_controller"
+  - "robotiq_gripper_controller"    # <-- add this
+```
+
+Pass `use_fake_hardware` to XACRO so the gripper uses mock hardware in sim:
+```yaml
+robot_description:
+  urdf:
+    package: "fairino_sim"
+    path: "description/fairino5.urdf.xacro"
+  srdf:
+    package: "fairino_sim"
+    path: "config/moveit/fairino5.srdf"
+  urdf_params:
+    - use_fake_hardware: "%>> hardware.simulated"
+```
+
+**Note on `urdf_params` substitution:** The `%>> hardware.simulated` syntax (which pulls values from other config.yaml fields) requires MoveIt Pro 8.8+ and may not be supported in all deployment contexts. If xacro fails with `"%>> hardware.simulated" is not a boolean expression`, hardcode the value instead (e.g., `"true"` for sim configs, `"false"` for hardware configs). The config inheritance system (`based_on_package`) is the intended way to switch between sim and hardware — the sim config hardcodes `"true"`, the hardware config inherits and overrides to `"false"`.
+
+### Step 6: Add Gripper Objectives
+
+**`objectives/open_gripper.xml`:**
+```xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<root BTCPP_format="4" main_tree_to_execute="Open Gripper">
+  <BehaviorTree ID="Open Gripper">
+    <Action ID="MoveGripperAction"
+      gripper_command_action_name="/robotiq_gripper_controller/gripper_cmd"
+      position="0.05"
+    />
+  </BehaviorTree>
+  <TreeNodesModel>
+    <SubTree ID="Open Gripper">
+      <MetadataFields>
+        <Metadata runnable="true" />
+        <Metadata subcategory="Gripper" />
+      </MetadataFields>
+    </SubTree>
+  </TreeNodesModel>
+</root>
+```
+
+**`objectives/close_gripper.xml`:** Same structure, `position="0.77"`.
+
+The `gripper_command_action_name` must match `/<controller_name>/gripper_cmd`.
+
+### Verification Steps
+
+After building, always check these before moving on:
+1. **Visual check**: Launch MoveIt Pro and verify the gripper fingers point **away** from the arm in the 3D view. If they point toward the wrist, you need to add/adjust the Z rotation in the origin.
+2. **Open/close**: Run the Open Gripper and Close Gripper objectives to verify the controller is working.
+3. **Teleop**: Verify joint jog still works with the gripper attached.
+4. **Collision**: Move the arm through various poses and check for unexpected collision warnings between gripper and arm links.
+
+### Gripper-Specific Gotchas
+
+- **Wrong orientation (most common issue)**: The default orientation (`rpy="0 0 0"`) is almost always wrong. Most gripper macros need `rpy="0 0 ${pi}"` to face the correct direction. The Kinova reference configs all use this rotation. **Always apply the 180° Z rotation as the starting point, not as a fix.**
+- **Mimic joints**: The Robotiq uses mimic joints — only `left_knuckle_joint` is actuated. If you see "multiple command interfaces" errors, check that only the left knuckle has a `<command_interface>` in the ros2_control xacro.
+- **Separate hardware interfaces**: The gripper runs as a separate `ros2_control` `<system>` from the arm. They coexist in the same controller manager but are independently managed.
+- **Gripper description package not found**: The `robotiq_description` package must be in your workspace or installed. A symlink works for dev; for Docker builds, add it as a submodule or copy.
+- **Collision spam**: If MoveIt reports many gripper self-collisions, you likely need more `disable_collisions` entries in the SRDF. Check all adjacent pairs and finger-tip/inner-knuckle pairs.
 
 ---
 
@@ -462,7 +676,7 @@ Use this checklist when creating a new config package:
 - [ ] `config/config.yaml` — master config, group name = `manipulator`
 - [ ] `config/control/<robot>_ros2_control.yaml` — all 4 controllers defined (JSB, JTAC, JVC, VFC)
 - [ ] `config/moveit/<robot>.srdf` — group named `manipulator`, collision pairs disabled
-- [ ] `config/moveit/kinematics.yaml` — group key = `manipulator`
+- [ ] `config/moveit/kinematics.yaml` — group key = `manipulator`, solver = `pose_ik_plugin/PoseIKPlugin` (NOT KDL)
 - [ ] `config/moveit/joint_limits.yaml` — limits for every joint
 - [ ] `config/moveit/joint_jog.yaml` — controller = `joint_velocity_controller`
 - [ ] `config/moveit/pose_jog.yaml` — controller = `joint_velocity_controller`
@@ -472,3 +686,12 @@ Use this checklist when creating a new config package:
 - [ ] `launch/agent_bridge.launch.xml` — standard two-include boilerplate
 - [ ] `objectives/` — at least one test objective
 - [ ] `waypoints/waypoints.yaml` — valid YAML list with at least one waypoint
+
+### If adding an end effector:
+- [ ] Gripper description package in workspace (submodule, symlink, or copy)
+- [ ] `package.xml` — `exec_depend` on gripper description package
+- [ ] `description/<robot>.urdf.xacro` — gripper macro included, attached to tool flange, `grasp_link` added
+- [ ] `config/moveit/<robot>.srdf` — `gripper` group, `end_effector`, open/close states, passive joints, collision pairs
+- [ ] `config/control/` — `robotiq_gripper_controller` (or equivalent) in controller_manager + params
+- [ ] `config/config.yaml` — gripper controller in `controllers_active_at_startup`, `urdf_params` for fake hardware
+- [ ] `objectives/open_gripper.xml` and `close_gripper.xml`
