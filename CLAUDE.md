@@ -2,6 +2,10 @@
 
 This workspace contains MoveIt Pro robot configuration packages. This guide covers building configs from two starting points: an existing URDF, or raw inputs (STLs/meshes).
 
+**The goal is always a buildable, runnable MoveIt Pro configuration.** Every config package you create must build with `moveit_pro build` and launch with `moveit_pro run`. Do not consider a config complete until it has been built and launched successfully. Before running `moveit_pro build` or `moveit_pro run`, ask the user for permission — these commands start Docker containers and may take significant time.
+
+**Where to create the config package:** If the user does not specify where to create the config package, **ask them**. Do not assume the current working directory is correct. The config package needs to be somewhere that MoveIt Pro can find it as the active configuration — ask the user where that is and how their workspace is set up.
+
 ## Official Documentation
 
 The official MoveIt Pro configuration tutorials live at:
@@ -47,7 +51,7 @@ moveit_pro run                    # Launch MoveIt Pro
 moveit_pro new config             # Scaffold a new config package from template
 ```
 
-No `colcon` is available on the host — always use `moveit_pro build`.
+`moveit_pro build` is the standard way to build the workspace (runs inside Docker). `colcon` may also be available on the host for power users, but default to `moveit_pro build`.
 
 ---
 
@@ -96,7 +100,9 @@ Or manually create the directory structure:
 
 #### 2. Robot Description (description/)
 
-**`<robot>.urdf.xacro`** — Wraps the existing URDF and adds ros2_control:
+**`<robot>.urdf.xacro`** — Wraps the existing URDF and adds ros2_control.
+
+Some robot descriptions provide a plain URDF file you can include directly:
 ```xml
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="my_robot">
@@ -106,6 +112,22 @@ Or manually create the directory structure:
 </robot>
 ```
 
+Many robot descriptions instead expose a **xacro macro** that must be included and then invoked. Check the source package's xacro files — if the robot's links and joints are wrapped in a `<xacro:macro>` block, you need to call the macro:
+```xml
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="my_robot">
+    <!-- Include the macro definition file -->
+    <xacro:include filename="$(find my_robot_description)/xacro/macro.my_robot.xacro" />
+    <!-- Invoke the macro to generate the robot links and joints -->
+    <xacro:my_robot namespace="" />
+
+    <xacro:include filename="my_robot.ros2_control.xacro" />
+    <xacro:my_robot_ros2_control name="MyRobotSystem" />
+</robot>
+```
+
+Note: When using a macro-based description, you typically write your own `ros2_control.xacro` with `mock_components/GenericSystem` rather than using the source package's ros2_control (which often pulls in real hardware driver plugins).
+
 **`<robot>.ros2_control.xacro`** — Defines hardware interface for each joint:
 - Use `mock_components/GenericSystem` for simulation
 - List every joint with `<command_interface>` (position) and `<state_interface>` (position, velocity)
@@ -114,11 +136,13 @@ Or manually create the directory structure:
 
 Critical decisions:
 - **Planning group name**: Use `manipulator` — MoveIt Pro hardcodes this name in several places (joint_velocity_controller, JTAC, teleop objectives)
-- **Chain**: Set `base_link` and `tip_link` for your kinematic chain
-- **Collision pairs**: Run the MoveIt Setup Assistant or manually disable collisions between adjacent/never-colliding links. Common pairs to disable:
-  - All adjacent link pairs (connected by a joint)
-  - Near-neighbor pairs (separated by one joint) that collide at common poses
-  - **Test the zero/home pose** — if it reports self-collision, you're missing a `disable_collisions` entry
+- **Chain**: Set `base_link` and `tip_link` for your kinematic chain. **How to identify the tool flange link**: find the last joint in the kinematic chain — its child link is the tool flange (e.g., `link_6`, `tool0`). Not every robot defines a `tool0` or `tool_link`; some just use the final numbered link.
+- **Collision pairs**: Run the MoveIt Setup Assistant or manually disable collisions between adjacent/never-colliding links. If Setup Assistant is not available, use this minimum checklist:
+  1. All adjacent link pairs (connected by a joint) — `reason="Adjacent"`
+  2. Near-neighbor pairs (separated by one joint) — `reason="Never"`
+  3. `base_link` ↔ second link (often can't collide due to geometry) — `reason="Never"`
+  4. If a gripper is attached: tool flange ↔ gripper base, and the link before the flange ↔ gripper base — see Part 1b for gripper-specific pairs
+  5. **Test the zero/home pose** — if it reports self-collision, you're missing a `disable_collisions` entry
 
 ```xml
 <group name="manipulator">
@@ -147,6 +171,80 @@ All three custom controllers (`JTAC`, `VFC`, `JVC`) must reference `planning_gro
 JTAC works without a force/torque sensor — it falls back to behaving like a standard JTC. VFC requires a force/torque sensor; if your robot doesn't have one, define it but it won't be usable for pose jogging.
 
 Note: You can use a basic `joint_trajectory_controller/JointTrajectoryController` instead of JTAC at startup, but MoveIt Pro's teleop will still try to switch to JTAC, so it must at minimum be defined and inactive.
+
+**Full controller parameter template** — replace joint names with your robot's joints:
+
+```yaml
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_admittance_controller:
+      type: joint_trajectory_admittance_controller/JointTrajectoryAdmittanceController
+
+    joint_velocity_controller:
+      type: joint_velocity_controller/JointVelocityController
+
+    velocity_force_controller:
+      type: velocity_force_controller/VelocityForceController
+
+joint_trajectory_admittance_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
+      - joint_6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 100.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.0
+    planning_group_name: manipulator
+
+joint_velocity_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
+      - joint_6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    planning_group_name: manipulator
+
+velocity_force_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5
+      - joint_6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    planning_group_name: manipulator
+```
 
 #### 5. Jog Configuration (config/moveit/)
 
@@ -306,7 +404,7 @@ Include the gripper macro and attach it to the arm's tool flange link:
 
 **Key parameters:**
 - `parent` — Your arm's tool flange link (e.g., `wrist3_link`, `tool0`, `fts_link`)
-- `origin` — **Almost always needs a 180° Z rotation** (`rpy="0 0 ${pi}"`). Most gripper URDF macros (including Robotiq) define their Z axis pointing into the mounting flange. Without this rotation the fingers will point back toward the arm. **Always start with `rpy="0 0 ${pi}"` and visually verify in the 3D view after building.**
+- `origin` — **Almost always needs a 180° Z rotation** (`rpy="0 0 ${pi}"`). Most gripper URDF macros define their Z axis pointing into the mounting flange. Without this rotation the fingers will point back toward the arm. **Always start with `rpy="0 0 ${pi}"` and visually verify in the 3D view after building.** However, **some gripper macros add their own internal rotation** via fixed joints between the parent attachment and the gripper base. Read the macro source first — look for fixed joints with non-zero `rpy` values. Your externally-applied rotation compounds with any internal one, so you may need to adjust accordingly.
 - `origin` Z offset — The `xyz` Z value must offset the gripper to the arm's **flange face**. Many arm URDFs place the last link's origin at the joint, not at the flange surface. If the gripper appears embedded inside the wrist, add a Z offset. Check the arm's URDF: look at the last link's inertial origin Z (center of mass) and visual mesh to estimate where the flange face is. For example, if `wrist3_link` has an inertial Z of ~0.076m, the flange face is likely around `0.09-0.10m`. **Always visually verify there is no overlap or gap between the gripper base and the arm wrist.**
 - `use_fake_hardware` — Pass through from config.yaml for sim/real switching
 - `prefix` — Use `""` for single-arm setups; use a prefix for dual-arm
@@ -322,7 +420,7 @@ Include the gripper macro and attach it to the arm's tool flange link:
 </joint>
 ```
 
-The 0.15m offset is typical for the 2F-85 — adjust based on your gripper's actual grasp point.
+Set the Z offset to place `grasp_link` at the point between the fingertips where you want the planner to target. This depends on your gripper's geometry — check the gripper URDF or CAD for finger length to determine the appropriate offset.
 
 ### Step 3: Update SRDF
 
@@ -369,11 +467,14 @@ Add these sections to the SRDF:
 <passive_joint name="robotiq_85_right_finger_tip_joint"/>
 ```
 
-**Collision pairs** — disable self-collision between gripper links and between gripper and arm wrist:
-- All adjacent gripper link pairs
-- Gripper links that are close but never collide
-- `wrist3_link` (or your tool flange) ↔ gripper base and nearby gripper links
-- `wrist2_link` ↔ gripper base (if close)
+**Collision pairs** — disable self-collision between gripper links and between gripper and arm wrist. Minimum checklist:
+- All adjacent gripper link pairs (parent-child in the URDF) — `reason="Adjacent"`
+- Tool flange link ↔ gripper base link and any intermediate gripper links — `reason="Adjacent"`
+- The link before the tool flange ↔ gripper base — `reason="Never"`
+- Inner knuckle ↔ inner finger (same side) — `reason="Never"`
+- Inner knuckle ↔ outer finger (same side) — `reason="Never"`
+- Cross-side gripper pairs that geometrically can't collide (e.g., left outer knuckle ↔ right outer knuckle) — `reason="Never"`
+- Finger pad links on opposite sides — `reason="Never"`
 
 ### Step 4: Add Gripper Controller
 
@@ -396,7 +497,7 @@ robotiq_gripper_controller:
     goal_tolerance: 0.02
 ```
 
-The gripper controller only commands `robotiq_85_left_knuckle_joint` — all other gripper joints mimic it.
+The gripper controller only commands the single actuated joint — all other gripper joints mimic it. **To find the actuated joint name and open/close values for your specific gripper**: read the gripper's `ros2_control.xacro` — the joint with a `<command_interface>` (that is NOT a mimic joint) is the actuated one. The `initial_value` in its `<state_interface>` is typically the open position. The joint limits in the URDF macro define the range. These values vary between gripper models — do not assume the names or values shown here apply to your gripper.
 
 ### Step 5: Update config.yaml
 
@@ -421,7 +522,7 @@ robot_description:
     - use_fake_hardware: "%>> hardware.simulated"
 ```
 
-**Note on `urdf_params` substitution:** The `%>> hardware.simulated` syntax (which pulls values from other config.yaml fields) requires MoveIt Pro 8.8+ and may not be supported in all deployment contexts. If xacro fails with `"%>> hardware.simulated" is not a boolean expression`, hardcode the value instead (e.g., `"true"` for sim configs, `"false"` for hardware configs). The config inheritance system (`based_on_package`) is the intended way to switch between sim and hardware — the sim config hardcodes `"true"`, the hardware config inherits and overrides to `"false"`.
+**`urdf_params` for sim/hardware switching:** For sim configs, hardcode `use_fake_hardware: "true"`. Use the config inheritance system (`based_on_package`) to override to `"false"` in the hardware config. The `%>> hardware.simulated` substitution syntax exists but requires MoveIt Pro 8.8+ and may not work in all deployment contexts — hardcoding is more reliable.
 
 ### Step 6: Add Gripper Objectives
 
@@ -677,7 +778,7 @@ Use this checklist when creating a new config package:
 - [ ] `config/control/<robot>_ros2_control.yaml` — all 4 controllers defined (JSB, JTAC, JVC, VFC)
 - [ ] `config/moveit/<robot>.srdf` — group named `manipulator`, collision pairs disabled
 - [ ] `config/moveit/kinematics.yaml` — group key = `manipulator`, solver = `pose_ik_plugin/PoseIKPlugin` (NOT KDL)
-- [ ] `config/moveit/joint_limits.yaml` — limits for every joint
+- [ ] `config/moveit/joint_limits.yaml` — limits for every joint (position and velocity limits from the URDF; `max_acceleration` from the manufacturer's datasheet — if unavailable, start conservative and tune based on testing)
 - [ ] `config/moveit/joint_jog.yaml` — controller = `joint_velocity_controller`
 - [ ] `config/moveit/pose_jog.yaml` — controller = `joint_velocity_controller`
 - [ ] `config/moveit/sensors_3d.yaml` — can be empty/minimal if no 3D sensors
@@ -686,6 +787,8 @@ Use this checklist when creating a new config package:
 - [ ] `launch/agent_bridge.launch.xml` — standard two-include boilerplate
 - [ ] `objectives/` — at least one test objective
 - [ ] `waypoints/waypoints.yaml` — valid YAML list with at least one waypoint
+- [ ] **Build**: `moveit_pro build` succeeds (ask user permission before running)
+- [ ] **Run**: `moveit_pro run` launches and reaches `You can start planning now!` (ask user permission before running)
 
 ### If adding an end effector:
 - [ ] Gripper description package in workspace (submodule, symlink, or copy)
@@ -695,3 +798,4 @@ Use this checklist when creating a new config package:
 - [ ] `config/control/` — `robotiq_gripper_controller` (or equivalent) in controller_manager + params
 - [ ] `config/config.yaml` — gripper controller in `controllers_active_at_startup`, `urdf_params` for fake hardware
 - [ ] `objectives/open_gripper.xml` and `close_gripper.xml`
+- [ ] **Build and run**: Rebuild with `moveit_pro build`, relaunch with `moveit_pro run`, verify gripper appears correctly in 3D view (ask user permission before running)
