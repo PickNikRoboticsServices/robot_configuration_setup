@@ -174,6 +174,28 @@ moveit_pro new config             # Scaffold a new config package from template 
 
 `moveit_pro build` is the standard way to build the workspace (runs inside Docker). `colcon` may also be available on the host for power users, but default to `moveit_pro build`.
 
+## Visual Verification Setup
+
+MoveIt Pro's web UI runs at `http://localhost`. To enable autonomous visual verification (screenshots that Claude can analyze), install Playwright:
+
+```bash
+# Requires Node.js (v18+)
+cd <workspace>/ui_testing   # or any convenient location
+npm init -y
+npm install playwright @playwright/test
+npx playwright install chromium
+```
+
+A screenshot capture script (`ui_testing/capture.js`) is provided in this repo. Usage:
+
+```bash
+node capture.js --output /tmp/moveit_pro_ui.png --wait 8000
+```
+
+This captures a 1920x1080 screenshot of the MoveIt Pro UI and reports any visible toast/alert messages as JSON. The `--wait` parameter (milliseconds) controls how long to wait after page load for the 3D view to render.
+
+The captured screenshot can then be read by Claude to verify robot visualization, gripper orientation, and UI error states. This is used in the Verification & Testing section (Step 5).
+
 ---
 
 ## Part 1: Building a Config from an Existing URDF
@@ -183,6 +205,7 @@ moveit_pro new config             # Scaffold a new config package from template 
 - A valid URDF or XACRO file for the robot
 - Joint names, link names, and kinematic chain known
 - MoveIt Pro installed and licensed
+- **Node.js and Playwright** (for automated visual verification) — see "Visual Verification Setup" below
 
 ### Step-by-Step
 
@@ -1216,12 +1239,30 @@ If joint jog fails:
 
 ### Step 5: Visual Inspection
 
-With the robot visible in the web UI, verify:
+Use the Playwright screenshot tool to capture the MoveIt Pro web UI and visually verify the robot configuration. This allows automated verification without requiring a human to open a browser.
+
+**Capture a screenshot:**
+```bash
+cd <path_to>/ui_testing && node capture.js --output /tmp/moveit_pro_ui.png --wait 8000
+```
+
+Then read the screenshot image and verify:
 
 1. **End effector orientation**: If using a gripper, the fingers should point **away** from the arm. If they point toward the wrist, the mounting rotation is wrong.
 2. **No gaps or overlaps**: The end effector base should sit flush against the arm's tool flange. A gap means the Z offset is too large; overlap means too small or missing.
 3. **Home pose looks reasonable**: The robot should not be in a fully extended or obviously impossible pose.
-4. **No collision warnings**: Check the UI and logs for unexpected self-collision reports. If the home pose reports collision, you're missing `disable_collisions` entries in the SRDF.
+4. **No collision warnings**: Check the UI for toast error messages. The capture script also collects visible toast/alert elements.
+5. **Robot is visible**: If the 3D view is empty or shows only a grid, the URDF failed to load — check the logs.
+
+**Capture after running an objective** to verify motion:
+```bash
+# Run an objective first
+docker exec -u <username> moveit_pro-drivers-1 bash -c "... ros2 action send_goal /do_objective ..."
+# Then capture the result
+node capture.js --output /tmp/after_move.png --wait 3000
+```
+
+If a human is available, ask them to also verify visually and test IMarker teleop (drag-and-drop in the 3D view), which cannot be automated with Playwright.
 
 ### Step 6: Test Motion Planning
 
