@@ -56,7 +56,19 @@ The official MoveIt Pro configuration tutorials live at:
 - **Navigation (Nav2)**: https://docs.picknik.ai/how_to/configuration_tutorials/add_nav2/
 - **State Estimation (Fuse)**: https://docs.picknik.ai/how_to/configuration_tutorials/add_fuse/
 
-The intended config progression is: mock config → sim config (inherits from mock, adds MuJoCo) → physical config (inherits from sim, adds real drivers). Use `based_on_package` in config.yaml for inheritance.
+The intended config progression is: base config (mock hardware) → sim config (inherits from base, adds physics simulation) → physical config (inherits from sim, adds real drivers). Use `based_on_package` in config.yaml for inheritance.
+
+## Naming Convention
+
+Config packages follow this naming pattern:
+
+| Package name | Type | Hardware |
+|-------------|------|----------|
+| `<robot>_base_config` | Base / mock config | `mock_components/GenericSystem` — no physics |
+| `<robot>_sim` | Sim config | `picknik_mujoco_ros/MujocoSystem` — physics simulation |
+| `<robot>_hw` or `<robot>_physical` | Physical config | Real hardware drivers |
+
+Each inherits from the previous via `based_on_package` in config.yaml. The base config is always built and verified first.
 
 ## Workspace Structure
 
@@ -66,7 +78,8 @@ my_robot_ws/
 ├── docker-compose.yaml           # Overrides for /opt/moveit_pro/docker-compose.yaml
 ├── colcon-defaults.yaml          # Colcon build settings
 └── src/
-    └── <config_package>/         # One or more config packages
+    ├── <robot>_base_config/      # Mock hardware config (always create first)
+    └── <robot>_sim/              # Sim config (inherits from base, adds physics)
 ```
 
 ### Workspace-Level Files

@@ -15,7 +15,7 @@ You are setting up a MoveIt Pro robot configuration package from scratch for a D
 
 ## Working Directory
 
-Place all your work in `~/doosan_ws/`. Create the MoveIt Pro config package here (e.g., `doosan_m1013_sim/`).
+Place all your work in `~/doosan_ws/`. Create the MoveIt Pro config package here (e.g., `doosan_m1013_base_config/`).
 
 ## What to Build
 
