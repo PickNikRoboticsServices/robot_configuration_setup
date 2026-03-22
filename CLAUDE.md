@@ -6,24 +6,31 @@ This workspace contains MoveIt Pro robot configuration packages and guides for b
 
 **Where to create the config package:** If the user does not specify where to create the config package, **ask them**. Do not assume the current working directory is correct. The config package needs to be somewhere that MoveIt Pro can find it as the active configuration — ask the user where that is and how their workspace is set up.
 
+**Do NOT use the MoveIt Setup Assistant (MSA).** The Setup Assistant is a GUI tool that cannot be driven by Claude. All configuration must be done by hand following the guides below.
+
 ## Which Guide to Follow
 
 The workflow depends on what assets you're starting with:
 
 | Starting point | Guide | What it covers |
 |---------------|-------|----------------|
-| **No URDF** — only CAD files, STLs, or meshes | [Building a URDF from CAD/STL Files](.claude/urdf_from_cad.md) | Construct a URDF from raw mesh files. Then proceed to the config guide. |
-| **Have a URDF** — an existing robot description package | [Creating a MoveIt Pro Config](.claude/existing_urdf_config.md) | Create the full MoveIt Pro configuration package. Includes adding end effectors. |
+| **No URDF** — only CAD files, STLs, or meshes | [Building a URDF from CAD/STL Files](.claude/urdf_from_cad.md) | Construct a URDF from raw mesh files. Then proceed to the mock config guide. |
+| **Have a URDF** — need a mock config | [Creating a MoveIt Pro Config](.claude/existing_urdf_config.md) | Create the mock MoveIt Pro configuration package. Includes adding end effectors. |
+| **Have a mock config** — need MuJoCo sim | MuJoCo Sim Config *(coming soon)* | Add MuJoCo physics simulation. Inherits from mock config via `based_on_package`. |
+| **Have a sim config** — need physical hardware | Physical Config *(coming soon)* | Add real hardware drivers. Inherits from sim config. |
+| **Mobile base robot** | Mobile Base + Nav2 *(coming soon)* | Mobile base control and ROS navigation setup. |
 | **Config is built** — need to verify it works | [Verification & Testing](.claude/verification.md) | Systematic testing: controllers, objectives, teleop, visual inspection. |
 | **Something broke** | [Debugging](.claude/debugging.md) | Log locations, common errors, CLI commands. |
 | **Quick reference** | [Complete File Checklist](.claude/file_checklist.md) | Every file needed in a config package. |
 
 **The intended progression is:**
 1. Get a URDF (either you have one, or build one from CAD/STLs)
-2. Create the MoveIt Pro config package
-3. Add an end effector (if applicable)
-4. Build, run, and verify
-5. Iterate until all verification steps pass
+2. Create the mock MoveIt Pro config package (arm + end effector)
+3. Build, run, and verify the mock config
+4. Create the MuJoCo sim config (inherits from mock, adds physics simulation)
+5. Create the physical config (inherits from sim, adds real hardware drivers)
+
+**For topics not yet covered by a guide**, fetch the official MoveIt Pro documentation using `WebFetch` on the relevant URL from the Official Documentation section below.
 
 ## Official Documentation
 
