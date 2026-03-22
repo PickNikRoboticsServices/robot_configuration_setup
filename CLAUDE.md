@@ -12,11 +12,11 @@ The workflow depends on what assets you're starting with:
 
 | Starting point | Guide | What it covers |
 |---------------|-------|----------------|
-| **No URDF** — only CAD files, STLs, or meshes | [Building a URDF from CAD/STL Files](docs/urdf_from_cad.md) | Construct a URDF from raw mesh files. Then proceed to the config guide. |
-| **Have a URDF** — an existing robot description package | [Creating a MoveIt Pro Config](docs/existing_urdf_config.md) | Create the full MoveIt Pro configuration package. Includes adding end effectors. |
-| **Config is built** — need to verify it works | [Verification & Testing](docs/verification.md) | Systematic testing: controllers, objectives, teleop, visual inspection. |
-| **Something broke** | [Debugging](docs/debugging.md) | Log locations, common errors, CLI commands. |
-| **Quick reference** | [Complete File Checklist](docs/file_checklist.md) | Every file needed in a config package. |
+| **No URDF** — only CAD files, STLs, or meshes | [Building a URDF from CAD/STL Files](.claude/urdf_from_cad.md) | Construct a URDF from raw mesh files. Then proceed to the config guide. |
+| **Have a URDF** — an existing robot description package | [Creating a MoveIt Pro Config](.claude/existing_urdf_config.md) | Create the full MoveIt Pro configuration package. Includes adding end effectors. |
+| **Config is built** — need to verify it works | [Verification & Testing](.claude/verification.md) | Systematic testing: controllers, objectives, teleop, visual inspection. |
+| **Something broke** | [Debugging](.claude/debugging.md) | Log locations, common errors, CLI commands. |
+| **Quick reference** | [Complete File Checklist](.claude/file_checklist.md) | Every file needed in a config package. |
 
 **The intended progression is:**
 1. Get a URDF (either you have one, or build one from CAD/STLs)
@@ -213,10 +213,10 @@ node capture.js --output /tmp/moveit_pro_ui.png --wait 8000
 
 This captures a 1920x1080 screenshot of the MoveIt Pro UI and reports any visible toast/alert messages as JSON. The `--wait` parameter (milliseconds) controls how long to wait after page load for the 3D view to render.
 
-The captured screenshot can then be read by Claude to verify robot visualization, gripper orientation, and UI error states. This is used in [Verification & Testing](docs/verification.md) Step 5.
+The captured screenshot can then be read by Claude to verify robot visualization, gripper orientation, and UI error states. This is used in [Verification & Testing](.claude/verification.md) Step 5.
 
 ## Prerequisites
 
 - MoveIt Pro installed and licensed
 - **Node.js and Playwright** (for automated visual verification) — see "Visual Verification Setup" above
-- A URDF for your robot (or CAD/STL files to build one — see [Building a URDF from CAD/STL Files](docs/urdf_from_cad.md))
+- A URDF for your robot (or CAD/STL files to build one — see [Building a URDF from CAD/STL Files](.claude/urdf_from_cad.md))
