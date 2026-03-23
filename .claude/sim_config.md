@@ -90,12 +90,14 @@ objectives:
 The sim xacro is a **new file** in the sim config package that replaces `mock_components/GenericSystem` with `picknik_mujoco_ros/MujocoSystem`. It is NOT a separate ros2_control xacro — the ros2_control block goes directly in the main xacro.
 
 Key differences from the base config xacro:
-- Set `include_ros2_control="false"` on the gripper macro (MujocoSystem handles all joints)
-- The `ros2_control` block includes ALL joints: arm, gripper command joint, and gripper passive joints
+- Do NOT include the base config's `ros2_control.xacro` — the MujocoSystem block replaces it entirely
+- If the gripper macro has `include_ros2_control`, set it to `"false"` (MujocoSystem handles all joints)
+- The `ros2_control` block includes ALL joints: arm, gripper command joint (if any), and gripper passive joints
 - Arm joints get `command_interface` (position) + `state_interface` (position, velocity, effort)
-- Gripper command joint (`finger_joint`) gets `command_interface` + `state_interface`
-- Gripper passive joints (inner knuckle, inner finger, outer knuckle) get only `state_interface`
+- Gripper command joint (if any) gets `command_interface` + `state_interface`
+- Gripper passive joints (if any) get only `state_interface`
 - Initial values must match the MuJoCo keyframe (e.g., home pose)
+- Pass through any `namespace` or other xacro args that the base config's robot macro expects
 
 ```xml
 <xacro:arg name="mujoco_model" default="description/mujoco/scene.xml" />
@@ -164,10 +166,20 @@ The MuJoCo model is split into two files:
 
 This is a multi-step pipeline:
 
-1. **Extract rendered URDF** from the running base config:
+1. **Extract rendered URDF** from the running base config. You need a container with the base config's packages installed. Options:
+   - If MoveIt Pro is running the base config: `docker exec` into the drivers or agent_bridge container
+   - Use `moveit_pro dev` to start a dev container (interactive, exits when the shell closes)
+   - Or run directly: `docker run --rm --entrypoint "" -v ~/my_ws/src:/home/$USER/user_ws/src -u $(id -u):$(id -g) <dev_image> sleep infinity` and `docker exec` into it
+
    ```bash
    # Inside a running MoveIt Pro container with the base config:
    ros2 topic echo /robot_description --once --field data > robot_description.urdf
+   ```
+
+   If the base config isn't running, you can also render the URDF on the host with xacro:
+   ```bash
+   # Inside the dev container (after sourcing the workspace):
+   xacro <path_to_base_config>/description/<robot>.urdf.xacro use_fake_hardware:=true > robot_description.urdf
    ```
 
 2. **Inject MuJoCo compiler options** into the URDF's `<mujoco>` tag:
@@ -366,6 +378,8 @@ moveit_pro build
 Fix any build errors before proceeding. Common build issues:
 - Missing `exec_depend` in package.xml (e.g., `picknik_mujoco_ros`)
 - CMakeLists.txt not installing new directories (e.g., `objectives/`)
+
+**Important:** If you override `ros2_control.config` in the sim config.yaml, the sim yaml **completely replaces** the base config's controller yaml — it does NOT merge. Your sim ros2_control yaml must include ALL controller definitions (controller_manager types, ALL controller parameters), not just the fields you want to change. Copy the base config's yaml as a starting point and modify it.
 
 ### 7b: Clear config cache
 

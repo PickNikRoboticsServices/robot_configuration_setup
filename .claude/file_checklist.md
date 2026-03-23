@@ -10,7 +10,7 @@ Use this checklist when creating a new config package.
 - [ ] `config/moveit/kinematics.yaml` — solver = `pose_ik_plugin/PoseIKPlugin` (NOT KDL), with `solve_mode: "optimize_distance"` and `optimization_timeout: 0.005`
 - [ ] `config/moveit/joint_limits.yaml` — limits for every joint (position and velocity limits from the URDF; `max_acceleration` from the manufacturer's datasheet — if unavailable, start conservative and tune based on testing)
 - [ ] `config/moveit/joint_jog.yaml` — controller = `joint_velocity_controller`
-- [ ] `config/moveit/pose_jog.yaml` — controller = `joint_velocity_controller`
+- [ ] `config/moveit/pose_jog.yaml` — controller = `velocity_force_controller`
 - [ ] `config/moveit/sensors_3d.yaml` — minimal if no 3D sensors (see note below about empty lists)
 - [ ] `description/<robot>.urdf.xacro` — includes URDF + ros2_control xacro
 - [ ] `description/<robot>.ros2_control.xacro` — mock_components for sim

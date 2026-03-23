@@ -11,6 +11,30 @@ This guide covers creating a complete MoveIt Pro configuration package when you 
 
 ### Step-by-Step
 
+#### 0. Get the Robot Description Package
+
+Before creating your config, you need the robot's URDF/description package in your workspace. Common approaches:
+
+```bash
+# Clone into your workspace src/ directory
+cd ~/my_robot_ws/src/
+git clone https://github.com/<org>/<robot_description_repo>.git
+```
+
+**Only copy what you need.** Many robot repos contain dozens of packages (drivers, examples, demos) but you only need the `*_description` package for the URDF and meshes. Either clone the whole repo and add `COLCON_IGNORE` files to packages you don't need, or copy just the description package directory.
+
+**ROS 1 packages are reusable.** The URDF/xacro format and mesh files are identical between ROS 1 and ROS 2. If the description package is ROS 1 (catkin), you need to convert its `package.xml` to format 3 and switch the build type to `ament_cmake`:
+- Change `<buildtool_depend>catkin</buildtool_depend>` to `<buildtool_depend>ament_cmake</buildtool_depend>`
+- Add `<export><build_type>ament_cmake</build_type></export>`
+- Update `CMakeLists.txt` to use `find_package(ament_cmake REQUIRED)` and `ament_package()` instead of catkin macros. For a description-only package (no compiled code), a minimal CMakeLists.txt that just installs directories is sufficient.
+
+**Binary package conflicts:** If `rosdep install` installs a binary version of the same package, your source copy must override it. Add the package name to `allow-overriding` in `colcon-defaults.yaml`:
+```yaml
+build:
+  allow-overriding:
+    - my_robot_description
+```
+
 #### 1. Scaffold the Package
 
 ```bash
@@ -154,7 +178,7 @@ JTAC works without a force/torque sensor — it falls back to behaving like a st
 
 Note: You can use a basic `joint_trajectory_controller/JointTrajectoryController` instead of JTAC at startup, but MoveIt Pro's teleop will still try to switch to JTAC, so it must at minimum be defined and inactive.
 
-**Full controller parameter template** — replace joint names with your robot's joints:
+**Full controller parameter template** — replace joint names with your robot's joints. **All array parameters (`stop_accelerations`, `max_joint_velocity`, `max_joint_acceleration`, `max_cartesian_velocity`, `max_cartesian_acceleration`) must have one entry per arm joint.** The template below shows 6 entries for a 6-DOF arm — adjust for your robot's DOF count (e.g., 7 entries for a 7-DOF arm):
 
 ```yaml
 controller_manager:
@@ -177,7 +201,7 @@ joint_trajectory_admittance_controller:
   ros__parameters:
     planning_group_name: manipulator
     sensor_frame: <tool_flange_link>
-    ee_frame: grasp_link
+    ee_frame: <tip_of_manipulator_chain>  # grasp_link if EE attached, or tool flange link if arm-only
     ft_sensor_name: ""
     stop_accelerations: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
     ft_cutoff_frequency_ratio: 1.0
@@ -206,8 +230,8 @@ joint_velocity_controller:
 velocity_force_controller:
   ros__parameters:
     planning_group_name: manipulator
-    sensor_frame: grasp_link
-    ee_frame: grasp_link
+    sensor_frame: <tip_of_manipulator_chain>  # grasp_link if EE attached, or tool flange link if arm-only
+    ee_frame: <tip_of_manipulator_chain>      # must match SRDF chain tip
     ft_sensor_name: ""
     ft_force_deadband: 0.0
     ft_torque_deadband: 0.0
@@ -740,4 +764,10 @@ After building, always check these before moving on:
 - **Separate hardware interfaces**: The end effector typically runs as a separate `ros2_control` `<system>` from the arm. They coexist in the same controller manager but are independently managed.
 - **End effector description package not found**: The description package must be in your workspace or installed as a binary. A symlink works for dev; for Docker builds, add it as a submodule or copy.
 - **Collision spam**: If MoveIt reports many self-collisions involving end effector links, you need more `disable_collisions` entries in the SRDF. Walk all link pairs systematically.
-- **End effectors with no ros2_control joints**: Some end effectors (vacuum grippers, pneumatic tools) are controlled via digital I/O rather than ros2_control joints. These may not need a controller in the ros2_control yaml at all — the actuation objective would use a different behavior (e.g., `SetIO`) instead of `MoveGripperAction`. The URDF still needs the links/meshes for collision and visualization, but there may be no movable joints.
+- **End effectors with no physical joints (vacuum grippers, etc.)**: Vacuum grippers have no physical moving joint, but in MoveIt Pro they typically still use a **virtual joint** + `GripperActionController` for on/off control. The pattern is:
+  1. Add a `prismatic` or `revolute` joint in the URDF with a small range (e.g., 0 to 1) that represents "off" to "on". This joint has no physical geometry change — it's just a control interface.
+  2. Add this virtual joint to the `ros2_control.xacro` with position command/state interfaces.
+  3. Use `GripperActionController` with this joint, same as a jaw gripper.
+  4. Create "Activate Vacuum" / "Deactivate Vacuum" objectives using `MoveGripperAction` with position 1.0 and 0.0.
+
+  See `factory_sim/description/suction_tool.urdf` for a working example. If you prefer not to use a virtual joint (e.g., for a real robot using digital I/O), the actuation would use `SetIO` behavior instead, but for mock/sim configs the virtual joint approach is simpler and consistent.

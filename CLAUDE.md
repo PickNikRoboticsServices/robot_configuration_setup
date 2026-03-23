@@ -2,7 +2,7 @@
 
 This workspace contains MoveIt Pro robot configuration packages and guides for building them.
 
-**The goal is always a buildable, runnable MoveIt Pro configuration.** Every config package you create must build with `moveit_pro build` and launch with `moveit_pro run`. Do not consider a config complete until it has been built and launched successfully. Before running `moveit_pro build` or `moveit_pro run`, ask the user for permission — these commands start Docker containers and may take significant time.
+**The goal is always a buildable, runnable MoveIt Pro configuration.** Every config package you create must build with `moveit_pro build` and launch with `moveit_pro run`. Do not consider a config complete until it has been built and launched successfully. You should run `moveit_pro build` and `moveit_pro run` yourself and iterate until the config works — do not hand off to the user after creating files. If the user has not explicitly granted permission to build/run, ask once before starting the build/run/verify loop.
 
 **Where to create the config package:** If the user does not specify where to create the config package, **ask them**. Do not assume the current working directory is correct. The config package needs to be somewhere that MoveIt Pro can find it as the active configuration — ask the user where that is and how their workspace is set up.
 
@@ -225,10 +225,10 @@ npm install playwright @playwright/test
 npx playwright install chromium
 ```
 
-A screenshot capture script (`ui_testing/capture.js`) is provided in this repo. Usage:
+A screenshot capture script is provided in this repo at `~/robot_configuration_setup/ui_testing/capture.js`. Usage:
 
 ```bash
-node capture.js --output /tmp/moveit_pro_ui.png --wait 8000
+node ~/robot_configuration_setup/ui_testing/capture.js --output /tmp/moveit_pro_ui.png --wait 8000
 ```
 
 This captures a 1920x1080 screenshot of the MoveIt Pro UI and reports any visible toast/alert messages as JSON. The `--wait` parameter (milliseconds) controls how long to wait after page load for the 3D view to render.

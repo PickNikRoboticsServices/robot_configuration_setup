@@ -2,9 +2,11 @@
 
 After `moveit_pro run` reaches `You can start planning now!`, verify the config systematically before considering it complete. Do not skip these steps — a config that launches is not necessarily a config that works.
 
-All verification commands run inside the Docker container via `docker compose exec`. The container name depends on which service you need:
-- **drivers**: `docker compose exec drivers bash -c "source /opt/overlay_ws/install/setup.bash && source \${HOME}/user_ws/install/setup.bash && <command>"`
-- **agent_bridge**: same pattern, substituting `agent_bridge` for `drivers`
+All verification commands run inside the Docker container via `docker exec`. Which container to use depends on the command:
+- **drivers** (`moveit_pro-drivers-1`): Controller queries (`ros2 control list_controllers`), joint state echo, hardware-level checks
+- **agent_bridge** (`moveit_pro-agent_bridge-1`): Objective execution (`ros2 action send_goal /do_objective ...`), action server queries, move_group checks
+
+Both containers need environment setup (CycloneDDS, workspace sourcing) before ROS 2 CLI commands will work.
 
 **Important: Restart the ROS2 daemon before running CLI commands.** CycloneDDS discovery over localhost does not work for new CLI processes unless the daemon is restarted. Run this once per container session before any other `ros2` commands:
 
@@ -66,17 +68,22 @@ Verify:
 
 ### Step 3: Run a Test Objective
 
-Run the simplest objective to verify the behavior tree execution pipeline works:
+Run the simplest objective to verify the behavior tree execution pipeline works. Use "Move to Home" as the universal first test (every config should have this):
 
 ```bash
-docker compose exec drivers bash -c "source /opt/overlay_ws/install/setup.bash && \
-  source \${HOME}/user_ws/install/setup.bash && \
-  ros2 action send_goal --feedback /do_objective \
+docker exec -u <username> moveit_pro-agent_bridge-1 bash -c "\
+  export CYCLONEDDS_URI=/home/<username>/.ros/cyclonedds.xml && \
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
+  source /opt/overlay_ws/install/setup.bash && \
+  source /home/<username>/user_ws/install/setup.bash && \
+  ros2 action send_goal /do_objective \
   moveit_studio_sdk_msgs/action/DoObjectiveSequence \
-  \"{objective_name: 'Open Gripper'}\""
+  '{objective_name: \"Move to Home\"}'"
 ```
 
-Then try Close Gripper. If these succeed, the objective server, controller manager, and end effector controller are all working together.
+**Note:** Objectives run via the `agent_bridge` container (where the objective server lives), not `drivers`.
+
+If your config has end effector objectives (Open/Close Gripper, Activate/Deactivate Vacuum, etc.), test those too. If these succeed, the objective server, controller manager, and controllers are all working together.
 
 ### Step 4: Test Teleop (Joint Jog)
 
