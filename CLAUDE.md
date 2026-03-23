@@ -16,7 +16,7 @@ The workflow depends on what assets you're starting with:
 |---------------|-------|----------------|
 | **No URDF** — only CAD files, STLs, or meshes | [Building a URDF from CAD/STL Files](.claude/urdf_from_cad.md) | Construct a URDF from raw mesh files. Then proceed to the mock config guide. |
 | **Have a URDF** — need a mock config | [Creating a MoveIt Pro Config](.claude/existing_urdf_config.md) | Create the mock MoveIt Pro configuration package. Includes adding end effectors. |
-| **Have a mock config** — need MuJoCo sim | MuJoCo Sim Config *(coming soon)* | Add MuJoCo physics simulation. Inherits from mock config via `based_on_package`. |
+| **Have a base config** — need physics sim | [Creating a Sim Config](.claude/sim_config.md) | Add physics simulation. Inherits from base config via `based_on_package`. |
 | **Have a sim config** — need physical hardware | Physical Config *(coming soon)* | Add real hardware drivers. Inherits from sim config. |
 | **Mobile base robot** | Mobile Base + Nav2 *(coming soon)* | Mobile base control and ROS navigation setup. |
 | **Config is built** — need to verify it works | [Verification & Testing](.claude/verification.md) | Systematic testing: controllers, objectives, teleop, visual inspection. |
