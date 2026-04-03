@@ -508,6 +508,26 @@ Standard boilerplate — rarely needs changes:
 </launch>
 ```
 
+#### 10. README
+
+Create a `README.md` at the workspace root (not inside the config package). This is the public-facing documentation for the workspace. Include:
+
+- Robot name and description (what arm, how many DOF)
+- Link to the [MoveIt Pro product page](https://picknik.ai/moveit-pro/)
+- Table of config packages in the workspace and what each one is for
+- Where the robot description comes from (link to upstream repo)
+- Screenshot of the robot in the MoveIt Pro web UI (capture with Playwright after verification)
+- Setup instructions: clone (with `--recurse-submodules` if using submodules), configure, build, run
+- Basic motion test command
+- Stop command (`moveit_pro down`)
+
+**Capture the screenshot with Playwright** after the config is verified and running:
+```bash
+node <path_to>/ui_testing/capture.js --output <workspace_root>/<robot>.png --wait 8000
+```
+
+If the MoveIt Pro trial dialog covers the viewport, dismiss it first (press Escape via Playwright) and recapture. Verify the screenshot shows the robot clearly before committing.
+
 ### Common Issues & Fixes
 
 | Error | Cause | Fix |

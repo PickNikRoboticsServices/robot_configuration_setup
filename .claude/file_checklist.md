@@ -19,6 +19,7 @@ Use this checklist when creating a new config package.
 - [ ] `waypoints/waypoints.yaml` — valid YAML list with at least one waypoint
 - [ ] **Build**: `moveit_pro build` succeeds (ask user permission before running)
 - [ ] **Run**: `moveit_pro run` launches and reaches `You can start planning now!` (ask user permission before running)
+- [ ] **README.md** at workspace root — robot description, MoveIt Pro link, config package table, setup/build/run/stop instructions, Playwright screenshot
 
 ### If adding an end effector:
 - [ ] Gripper description package in workspace (submodule, symlink, or copy)
