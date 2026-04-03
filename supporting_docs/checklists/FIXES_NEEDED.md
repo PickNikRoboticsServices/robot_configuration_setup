@@ -58,7 +58,7 @@ Added "Move to Home" objective template with explanation of `RetrieveWaypoint` p
 ## 11. Controller templates missing required parameters
 **Category:** Missing
 **Status:** DONE
-JTAC template was missing `sensor_frames`, `ee_frames`, `ft_sensor_name`, `stop_accelerations`. JVC template was missing `max_joint_velocity`, `max_joint_acceleration`. VFC template was missing `max_joint_velocity`, `max_joint_acceleration`, `max_cartesian_velocity`, `max_cartesian_acceleration`, `sensor_frame`, `ee_frame`, `ft_sensor_name`. All templates updated.
+JTAC template was missing `sensor_frames`, `ee_frames`, `ft_sensor_name`, `stop_accelerations`. JVC template was missing `max_joint_velocity`, `max_joint_acceleration`. VFC template was missing `max_joint_velocity`, `max_joint_acceleration`, `max_cartesian_velocity`, `max_cartesian_acceleration`, `sensor_frames`, `ee_frames`, `ft_sensor_name`. All templates updated.
 
 ## 12. `state_publish_rate` must be integer, not float
 **Category:** Bug in template
@@ -83,7 +83,7 @@ Added Verification & Testing section with 6 steps and a checklist.
 ## 16. VFC/pose jog claimed to require F/T sensor — wrong
 **Category:** Incorrect information
 **Status:** DONE
-VFC works without F/T sensor when `ft_sensor_name: ""`. The actual issue was that the SRDF `manipulator` chain tip must extend to `grasp_link` (not stop at the tool flange). VFC's `ee_frame` must be the tip of the planning group chain. Updated CLAUDE.md SRDF guidance and VFC template.
+VFC works without F/T sensor when `ft_sensor_name: ""`. The actual issue was that the SRDF `manipulator` chain tip must extend to `grasp_link` (not stop at the tool flange). VFC's `ee_frames` must be the tip of the planning group chain. Updated CLAUDE.md SRDF guidance and VFC template.
 
 ## 17. Exhaustive gripper collision pairs needed
 **Category:** Lesson learned

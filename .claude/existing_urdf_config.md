@@ -1,5 +1,7 @@
 # Creating a MoveIt Pro Config from an Existing URDF
 
+> **MANDATORY: Task tracking.** Before starting this guide, create a task for each numbered step below using `TaskCreate`. Mark each task `in_progress` when you start it and `completed` when you finish it. Do not skip steps. If a step cannot be completed, stop and ask the user — do not silently move on.
+
 This guide covers creating a complete MoveIt Pro configuration package when you already have a URDF or XACRO description of your robot. If you don't have a URDF yet, see [Building a URDF from CAD/STL Files](urdf_from_cad.md) first.
 
 ### Prerequisites
@@ -120,6 +122,19 @@ Note: When using a macro-based description, you typically write your own `ros2_c
 
 **Watch for unwanted simulator dependencies:** Many robot description packages unconditionally include Gazebo, Ignition, or MuJoCo plugin macros that reference packages not in your workspace (e.g., a Gazebo controller config package). These will cause `PackageNotFoundError` at runtime even though you don't need the simulator. **Read the robot macro's includes** — if you see `<xacro:include>` for gazebo/ignition/mujoco config files, and those files reference packages you don't have, comment out the invocation of that macro in your local copy of the robot description.
 
+**Always add a `grasp_link`** — even for arm-only configs (no gripper). Place it at the tool flange face, offset from the last link's frame origin. This is needed for correct IMarker placement (the IMarker appears at the SRDF chain tip, which should be at the flange face, not at the last joint center):
+
+```xml
+<link name="grasp_link" />
+<joint name="grasp_link_joint" type="fixed">
+    <parent link="<tool_flange_link>" />
+    <child link="grasp_link" />
+    <origin xyz="0 0 <offset_to_flange_face>" rpy="0 0 0" />
+</joint>
+```
+
+To determine the Z offset: check the last link's inertial center-of-mass Z value and visual mesh extent. If the inertial Z is ~0.076m, the flange face is likely ~0.09–0.10m from the frame origin. Always verify visually after building — the IMarker should appear at the tool tip, not embedded in the wrist.
+
 **`<robot>.ros2_control.xacro`** — Defines hardware interface for each joint:
 - Use `mock_components/GenericSystem` for simulation
 - List every joint with `<command_interface>` (position) and `<state_interface>` (position, velocity)
@@ -143,7 +158,18 @@ Critical decisions:
 <group_state name="home" group="manipulator">
     <!-- Set joint values to a known safe pose, NOT all zeros if that causes collision -->
 </group_state>
+
+<!-- End effector group: REQUIRED even for arm-only configs.
+     MoveIt Pro's teleop UI crashes with "Couldn't find an end effector group"
+     if this is missing. For arm-only (no gripper), create a minimal group
+     referencing the tool flange link: -->
+<group name="gripper">
+    <link name="tool_link"/>
+</group>
+<end_effector name="gripper" parent_link="tool_link" group="gripper"/>
 ```
+
+**The end effector group is always required.** Even if your robot has no physical gripper, you must define a minimal `gripper` group and `<end_effector>` in the SRDF. The MoveIt Pro web UI teleop mode requires it — without it, switching to teleop will crash with "Couldn't find an end effector group for the current planning group". For arm-only configs, use the tool flange link as the sole member. When you later add a real end effector, replace this stub with the full gripper group.
 
 #### 3b. Kinematics (config/moveit/kinematics.yaml)
 
@@ -200,13 +226,14 @@ controller_manager:
 joint_trajectory_admittance_controller:
   ros__parameters:
     planning_group_name: manipulator
-    sensor_frame: <tool_flange_link>
-    ee_frame: <tip_of_manipulator_chain>  # grasp_link if EE attached, or tool flange link if arm-only
+    sensor_frames: ["<tool_flange_link>"]
+    ee_frames: ["<tip_of_manipulator_chain>"]  # grasp_link if EE attached, or tool flange link if arm-only
     ft_sensor_name: ""
     stop_accelerations: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
     ft_cutoff_frequency_ratio: 1.0
     ft_force_deadband: 0.0
     ft_torque_deadband: 0.0
+    default_path_tolerance: 0.5  # Relax from tight default — prevents stitching failures after interrupted trajectories
 
 joint_velocity_controller:
   ros__parameters:
@@ -232,6 +259,7 @@ velocity_force_controller:
     planning_group_name: manipulator
     sensor_frame: <tip_of_manipulator_chain>  # grasp_link if EE attached, or tool flange link if arm-only
     ee_frame: <tip_of_manipulator_chain>      # must match SRDF chain tip
+    # Note: VFC uses singular sensor_frame/ee_frame (NOT the plural form). JTAC uses the plural sensor_frames/ee_frames.
     ft_sensor_name: ""
     ft_force_deadband: 0.0
     ft_torque_deadband: 0.0
@@ -490,12 +518,13 @@ Standard boilerplate — rarely needs changes:
 | `SwitchController: controller X not existing` | Controller not in ros2_control yaml | Add controller definition and register in config.yaml |
 | `self-collision` at start | Missing `disable_collisions` in SRDF | Add the reported link pair to SRDF disable_collisions |
 | `edit_waypoints service not available` | waypoints.yaml is empty or invalid | Initialize with a valid YAML list (at least one waypoint) |
+| Teleop crashes: "Couldn't find an end effector group" | No `<end_effector>` defined in SRDF | Add a `gripper` group and `<end_effector>` to the SRDF — required even for arm-only configs. See SRDF section above. |
 | Teleop jog doesn't work | joint_jog.yaml points to wrong controller | Set `controllers: ['joint_velocity_controller']` |
 | `KDLKinematicsPlugin failed to load` | MoveIt Pro uses `PoseIKPlugin`, not KDL | Change kinematics.yaml solver to `pose_ik_plugin/PoseIKPlugin` |
-| `sensor_frame` parameter errors | JTAC/VFC `sensor_frame` or `ee_frame` misconfigured | Use singular form: `sensor_frame: <link>` and `ee_frame: grasp_link`. Both must exist in the kinematic chain. |
-| `No inverse kinematics solution found` (IMarker) | IK solver misconfigured or `ee_frame` not the chain tip | Ensure kinematics.yaml has `solve_mode: "optimize_distance"` and `optimization_timeout: 0.005`. Ensure SRDF chain tip = `grasp_link` and VFC/JTAC `ee_frame: grasp_link`. |
+| `sensor_frame` / `sensor_frames` parameter errors | JTAC/VFC frame parameters misconfigured | **JTAC** uses plural array form: `sensor_frames: ["<link>"]` and `ee_frames: ["<link>"]`. **VFC** uses singular form: `sensor_frame: <link>` and `ee_frame: <link>`. Both links must exist in the kinematic chain. |
+| `No inverse kinematics solution found` (IMarker) | IK solver misconfigured or `ee_frame`/`ee_frames` not the chain tip | Ensure kinematics.yaml has `solve_mode: "optimize_distance"` and `optimization_timeout: 0.005`. Ensure SRDF chain tip = `grasp_link` and JTAC `ee_frames: ["grasp_link"]` / VFC `ee_frame: grasp_link`. |
 | `Expected 'value' ... got '()' of type 'tuple'` | A YAML config file contains an empty list `[]` (e.g., `sensors: []`) | ROS2 parameters cannot represent empty lists — they become empty tuples in the launch system and crash. Remove the key entirely or give it a non-empty value |
-| `parameter '' has invalid type: expected [double_array] got [not set]` | Controller (JTAC, VFC, or JVC) is missing required array parameters | JTAC needs `sensor_frame`, `ee_frame`, `ft_sensor_name`, `stop_accelerations`. VFC/JVC need `max_joint_velocity`, `max_joint_acceleration`. See controller template |
+| `parameter '' has invalid type: expected [double_array] got [not set]` | Controller (JTAC, VFC, or JVC) is missing required array parameters | JTAC needs `sensor_frames`, `ee_frames`, `ft_sensor_name`, `stop_accelerations`. VFC needs `sensor_frame`, `ee_frame`, `max_joint_velocity`, `max_joint_acceleration`. JVC needs `max_joint_velocity`, `max_joint_acceleration`. See controller template |
 | `parameter 'state_publish_rate' has invalid type: expected [integer] got [double]` | Rate parameter is `100.0` instead of `100` | Use integer values (no decimal point) for `state_publish_rate` and `action_monitor_rate` |
 
 **Critical: No empty lists in YAML config files.** ROS2 node parameters cannot represent empty lists. If a YAML file loaded as parameters contains `key: []`, the launch system converts it to an empty tuple `()` and crashes with the `Expected 'value'` error. Either remove the key or provide a valid non-empty value. This most commonly affects `sensors_3d.yaml` — if you have no 3D sensors, use:

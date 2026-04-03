@@ -8,6 +8,8 @@ This workspace contains MoveIt Pro robot configuration packages and guides for b
 
 **Do NOT use the MoveIt Setup Assistant (MSA).** The Setup Assistant is a GUI tool that cannot be driven by Claude. All configuration must be done by hand following the guides below.
 
+**MANDATORY: Task tracking for all guides.** When following any guide in `.claude/`, create a task for each numbered step using `TaskCreate` before you begin. Mark each task `in_progress` when you start it and `completed` when done. Do not skip steps — if a step cannot be completed, stop and ask the user. This includes verification steps (Playwright screenshots, CLI checks, teleop testing). A config is not done until every task from every applicable guide is completed.
+
 ## Which Guide to Follow
 
 The workflow depends on what assets you're starting with:
@@ -205,7 +207,9 @@ test:
 ```bash
 moveit_pro configure -w <workspace_dir> -c <config_package_name>  # Point MoveIt Pro at a workspace and config
 moveit_pro build                  # Build the workspace (runs inside Docker)
+moveit_pro build user_workspace   # Rebuild only the ROS workspace (faster, no Docker image rebuild)
 moveit_pro run                    # Launch MoveIt Pro
+moveit_pro down                   # Stop and remove all MoveIt Pro containers
 moveit_pro new config             # Scaffold a new config package from template (workspace-level files NOT included)
 ```
 

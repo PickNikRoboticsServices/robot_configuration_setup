@@ -1,5 +1,7 @@
 # Creating a Sim Config (Physics Simulation)
 
+> **MANDATORY: Task tracking.** Before starting this guide, create a task for each numbered step below using `TaskCreate`. Mark each task `in_progress` when you start it and `completed` when you finish it. Do not skip steps. If a step cannot be completed, stop and ask the user — do not silently move on.
+
 This guide covers creating a sim config that adds physics simulation to an existing base config. The sim config inherits from the base config via `based_on_package` and overrides only what's needed for physics.
 
 **Prerequisites:**
@@ -226,6 +228,10 @@ This is a multi-step pipeline:
    ```
    This produces `robot_description.xml` with: asset declarations, auto-generated actuators (position, kp=1000), gravity compensation, and the full body tree.
 
+   **Do not hand-write or reorganize the body tree.** The body hierarchy, inertials, and joint transforms are generated from the rendered URDF and must match exactly. Hand-writing the MJCF body tree leads to subtle transform errors that cause simulation instability. Only modify actuators, contact exclusions, and defaults after generation.
+
+   **Actuator names must match ros2_control joint names exactly.** The MujocoSystem plugin matches actuators to ros2_control joints by actuator `name`, not by the `joint` attribute. The `urdf_to_mjcf` tool sets both to the joint name (e.g., `name="j1" joint="j1"`). If you rename actuators (e.g., `name="j1_actuator"`), MujocoSystem will crash with: `Actuator name 'j1_actuator' does not match name of any joints in the model.`
+
 6. **Tune the generated XML:**
 
    **Actuators** — Use `kp` (stiffness) + `kv` (velocity damping) for tight trajectory tracking. Scale by joint torque capacity / link mass. The `urdf_to_mjcf` tool generates default `kp=1000, dampratio=1` which is too weak for most arms.
@@ -246,6 +252,10 @@ This is a multi-step pipeline:
 
    Set `ctrlrange` to match the joint limits from the URDF/SRDF. Remove the `forcelimited="false"` that `urdf_to_mjcf` adds by default.
 
+   **`actuatorfrcrange` can cause saturation.** The `urdf_to_mjcf` tool sets `actuatorfrcrange` from the URDF's `<limit effort="...">` values. Wrist joints on smaller arms often have low effort limits (e.g., 28 Nm) that cause actuator force saturation in sim — the actuator can't apply enough force to track the commanded position, leading to joint drift and instability. **Increase `actuatorfrcrange` on wrist joints to at least ±150 Nm for simulation**, or remove the attribute entirely to allow unlimited force. The real hardware effort limits still apply on the physical config.
+
+   **Alternative: use `dampratio` instead of explicit `kv`.** MuJoCo's `dampratio` parameter auto-scales velocity damping based on joint inertia, which avoids the need to manually tune `kv` per joint. A uniform `kp=5000, dampratio=2` works well for many 6-DOF arms. This is simpler than per-joint `kv` tuning but provides less fine-grained control.
+
    **Contact exclusions** — Mirror the SRDF `disable_collisions` entries using MuJoCo `<contact><exclude>` syntax. At minimum, exclude:
    - Adjacent arm links (parent-child pairs)
    - Near-neighbor arm links (skip-one pairs)
@@ -265,11 +275,13 @@ The scene file includes the robot and adds the simulation environment:
 
 ```xml
 <mujoco model="<robot> scene">
+  <option timestep="0.001"/>
   <include file="assets/robot_description.xml"/>
 
   <statistic center="0.3 0 0.5" extent="1.5"/>
   <default>
     <geom solref=".004 1"/>
+    <joint damping="20"/>
   </default>
 
   <visual>
@@ -300,6 +312,8 @@ The scene file includes the robot and adds the simulation environment:
   </keyframe>
 </mujoco>
 ```
+
+**`timestep` and `damping` are critical for stability.** The default MuJoCo timestep (0.002s) combined with high actuator gains can cause oscillation. Use `timestep="0.001"` for robot arms. The `<joint damping="20"/>` default adds velocity-proportional damping to all joints, preventing high-frequency oscillation especially on light wrist joints. Increase damping if wrist joints still oscillate; decrease if motions feel sluggish.
 
 **Keyframe values:** `qpos` and `ctrl` must have one entry per joint, in the order they appear in the MJCF body tree. Match the home pose from the SRDF `group_state`. Gripper joints are typically all 0 (open).
 

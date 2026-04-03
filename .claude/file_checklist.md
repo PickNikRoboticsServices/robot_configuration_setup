@@ -6,7 +6,7 @@ Use this checklist when creating a new config package.
 - [ ] `package.xml` — declares dependencies
 - [ ] `config/config.yaml` — master config, group name = `manipulator`
 - [ ] `config/control/<robot>_ros2_control.yaml` — all 4 controllers defined (JSB, JTAC, JVC, VFC)
-- [ ] `config/moveit/<robot>.srdf` — group named `manipulator`, collision pairs disabled
+- [ ] `config/moveit/<robot>.srdf` — group named `manipulator`, collision pairs disabled, `gripper` group + `<end_effector>` defined (required for teleop even on arm-only configs)
 - [ ] `config/moveit/kinematics.yaml` — solver = `pose_ik_plugin/PoseIKPlugin` (NOT KDL), with `solve_mode: "optimize_distance"` and `optimization_timeout: 0.005`
 - [ ] `config/moveit/joint_limits.yaml` — limits for every joint (position and velocity limits from the URDF; `max_acceleration` from the manufacturer's datasheet — if unavailable, start conservative and tune based on testing)
 - [ ] `config/moveit/joint_jog.yaml` — controller = `joint_velocity_controller`

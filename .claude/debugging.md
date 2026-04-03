@@ -4,21 +4,27 @@ Reference for troubleshooting MoveIt Pro runtime issues.
 
 ### Log Location
 
-MoveIt Pro backend writes all output to `/tmp/agent_robot.log` inside the Docker container.
+MoveIt Pro outputs logs via Docker's standard logging. Use `docker logs` to access them:
 
 ```bash
-# View recent logs
-docker compose exec dev bash -c 'tail -50 /tmp/agent_robot.log'
+# View recent driver logs (controllers, hardware interfaces, ros2_control)
+docker logs moveit_pro-drivers-1 --tail 50
 
-# Search for errors
-docker compose exec dev bash -c 'grep -i "error\|fatal\|failed" /tmp/agent_robot.log | tail -20'
+# View recent agent_bridge logs (objectives, move_group, planning)
+docker logs moveit_pro-agent_bridge-1 --tail 50
 
-# Objective execution errors specifically
-docker compose exec dev bash -c 'grep "objective_server_node" /tmp/agent_robot.log | tail -20'
+# Search for errors in drivers
+docker logs moveit_pro-drivers-1 2>&1 | grep -i "error\|fatal\|failed" | tail -20
+
+# Search for objective execution errors
+docker logs moveit_pro-agent_bridge-1 2>&1 | grep "objective_server_node" | tail -20
 
 # Follow logs in real time
-docker compose exec dev bash -c 'tail -f /tmp/agent_robot.log'
+docker logs moveit_pro-drivers-1 --follow
+docker logs moveit_pro-agent_bridge-1 --follow
 ```
+
+**Important:** `docker compose exec` requires the correct project context. MoveIt Pro runs as the `moveit_pro` compose project. Running `docker compose` from your workspace directory will fail because it only sees your override file. Use `docker exec` with explicit container names (`moveit_pro-drivers-1`, `moveit_pro-agent_bridge-1`) instead — this works regardless of your current directory.
 
 The backend is fully ready when you see: `You can start planning now!`
 
@@ -54,17 +60,40 @@ A required port in the behavior tree XML is missing or has the wrong name.
 
 **Stale Plugin Crashes**: `pluginlib` discovers plugins on `AMENT_PREFIX_PATH`, including previously-built-but-currently-skipped packages. If a plugin's `.so` doesn't exist at runtime, loading will crash. A clean rebuild fixes this.
 
+**Build fails immediately after `moveit_pro down`**: Running `moveit_pro build user_workspace` right after `moveit_pro down` sometimes fails because the build container can't start while the previous containers are still cleaning up. Simply retry the build command — it will succeed on the second attempt.
+
+### Stopping and Restarting
+
+```bash
+moveit_pro down                   # Stop and remove all containers
+moveit_pro build user_workspace   # Rebuild (faster than full `moveit_pro build`)
+moveit_pro run                    # Relaunch
+```
+
+When switching between configs (e.g., base → sim), you must also reconfigure:
+```bash
+moveit_pro down
+moveit_pro configure -w <workspace_dir> -c <new_config_package>
+moveit_pro build user_workspace
+moveit_pro run
+```
+
+**Clear the config cache** when changing SRDF, controller config, or other cached parameters:
+```bash
+rm -rf ~/.config/moveit_pro/<config_package_name>
+```
+
 ### Triggering Objectives from CLI
 
 ```bash
 # Run an objective
-docker compose exec dev bash -c "source /opt/overlay_ws/install/setup.bash && \
+docker exec moveit_pro-agent_bridge-1 bash -c "source /opt/overlay_ws/install/setup.bash && \
   source \${HOME}/user_ws/install/setup.bash && \
   ros2 action send_goal --feedback /do_objective \
   moveit_studio_sdk_msgs/action/DoObjectiveSequence \
   \"{objective_name: 'My Objective Name'}\""
 
 # Cancel a running objective
-docker compose exec dev bash -c "source /opt/overlay_ws/install/setup.bash && \
+docker exec moveit_pro-agent_bridge-1 bash -c "source /opt/overlay_ws/install/setup.bash && \
   ros2 service call /cancel_objective moveit_studio_sdk_msgs/srv/CancelObjective {}"
 ```

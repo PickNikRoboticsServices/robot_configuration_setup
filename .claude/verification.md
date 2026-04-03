@@ -1,5 +1,7 @@
 # Verification & Testing
 
+> **MANDATORY: Task tracking.** Before starting verification, create a task for each step below (Steps 1–6) using `TaskCreate`. Mark each task `in_progress` when you start it and `completed` when you finish it. Do not skip steps. If a step cannot be completed, stop and ask the user — do not silently move on. A config is not complete until every task is marked completed.
+
 After `moveit_pro run` reaches `You can start planning now!`, verify the config systematically before considering it complete. Do not skip these steps — a config that launches is not necessarily a config that works.
 
 All verification commands run inside the Docker container via `docker exec`. Which container to use depends on the command:
@@ -7,6 +9,8 @@ All verification commands run inside the Docker container via `docker exec`. Whi
 - **agent_bridge** (`moveit_pro-agent_bridge-1`): Objective execution (`ros2 action send_goal /do_objective ...`), action server queries, move_group checks
 
 Both containers need environment setup (CycloneDDS, workspace sourcing) before ROS 2 CLI commands will work.
+
+**Important:** Do NOT use `docker compose exec` — it requires the correct project context and will fail with "service has neither an image nor a build context" if run from your workspace directory. MoveIt Pro runs as the `moveit_pro` compose project, but your workspace only has an override file. Use `docker exec` with explicit container names (`moveit_pro-drivers-1`, `moveit_pro-agent_bridge-1`) instead.
 
 **Important: Restart the ROS2 daemon before running CLI commands.** CycloneDDS discovery over localhost does not work for new CLI processes unless the daemon is restarted. Run this once per container session before any other `ros2` commands:
 
@@ -36,8 +40,11 @@ docker exec -u <username> moveit_pro-drivers-1 bash -c "\
 Check that all expected controllers are loaded and in the correct state:
 
 ```bash
-docker compose exec drivers bash -c "source /opt/overlay_ws/install/setup.bash && \
-  source \${HOME}/user_ws/install/setup.bash && \
+docker exec -u <username> moveit_pro-drivers-1 bash -c "\
+  export CYCLONEDDS_URI=/home/<username>/.ros/cyclonedds.xml && \
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
+  source /opt/overlay_ws/install/setup.bash && \
+  source /home/<username>/user_ws/install/setup.bash && \
   ros2 control list_controllers"
 ```
 
@@ -55,8 +62,11 @@ If any controller is missing, check the ros2_control yaml and config.yaml `contr
 Confirm the robot is publishing joint states and the joint names match your config:
 
 ```bash
-docker compose exec drivers bash -c "source /opt/overlay_ws/install/setup.bash && \
-  source \${HOME}/user_ws/install/setup.bash && \
+docker exec -u <username> moveit_pro-drivers-1 bash -c "\
+  export CYCLONEDDS_URI=/home/<username>/.ros/cyclonedds.xml && \
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
+  source /opt/overlay_ws/install/setup.bash && \
+  source /home/<username>/user_ws/install/setup.bash && \
   ros2 topic echo /joint_states --once"
 ```
 
@@ -131,8 +141,11 @@ If a human is available, ask them to also verify visually and test IMarker teleo
 Try planning and executing a motion to verify the full pipeline:
 
 ```bash
-docker compose exec drivers bash -c "source /opt/overlay_ws/install/setup.bash && \
-  source \${HOME}/user_ws/install/setup.bash && \
+docker exec -u <username> moveit_pro-agent_bridge-1 bash -c "\
+  export CYCLONEDDS_URI=/home/<username>/.ros/cyclonedds.xml && \
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && \
+  source /opt/overlay_ws/install/setup.bash && \
+  source /home/<username>/user_ws/install/setup.bash && \
   ros2 action send_goal --feedback /do_objective \
   moveit_studio_sdk_msgs/action/DoObjectiveSequence \
   \"{objective_name: 'Move to Waypoint'}\""
@@ -143,15 +156,6 @@ Or use the web UI to drag the interactive marker and plan a motion. If planning 
 - Verify the manipulator chain in the SRDF is correct (base_link to tip_link)
 - Check joint limits in joint_limits.yaml match the URDF
 
-### Verification Checklist
+### Verification Complete
 
-Use this checklist after every build-and-run cycle:
-
-- [ ] `You can start planning now!` appears in logs
-- [ ] All controllers loaded in correct state (Step 1)
-- [ ] Joint states publishing with correct joint names (Step 2)
-- [ ] Open/Close Gripper objectives succeed (Step 3)
-- [ ] Joint jog teleop works (Step 4)
-- [ ] End effector orientation is correct in 3D view (Step 5)
-- [ ] No unexpected self-collision warnings (Step 5)
-- [ ] Motion planning to a waypoint succeeds (Step 6)
+When all Steps 1–6 above are marked as completed tasks, the config is verified. If any step was skipped or could not be completed, the config is NOT verified — flag it to the user.
