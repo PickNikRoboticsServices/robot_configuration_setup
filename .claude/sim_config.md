@@ -234,27 +234,26 @@ This is a multi-step pipeline:
 
 6. **Tune the generated XML:**
 
-   **Actuators** — Use `kp` (stiffness) + `kv` (velocity damping) for tight trajectory tracking. Scale by joint torque capacity / link mass. The `urdf_to_mjcf` tool generates default `kp=1000, dampratio=1` which is too weak for most arms.
+   **Actuators — use `dampratio` (not explicit `kv`).** The `urdf_to_mjcf` tool generates default `kp=1000, dampratio=1` which is too weak for most arms. The recommended approach is uniform `kp` with `dampratio`:
 
-   For a heavy 6-DOF arm (e.g., Doosan M1013 with ~10 kg links, 346 Nm shoulder):
    ```xml
-   <!-- Shoulder/base joints (heavy, 346 Nm) -->
-   <position joint="joint_1" kp="4000" kv="600" ctrlrange="-6.2832 6.2832"/>
-   <!-- Elbow joints (medium, 163 Nm) -->
-   <position joint="joint_3" kp="2000" kv="300" ctrlrange="-2.7925 2.7925"/>
-   <!-- Wrist joints (light, 50 Nm) -->
-   <position joint="joint_5" kp="1000" kv="150" ctrlrange="-6.2832 6.2832"/>
-   <!-- Gripper joints -->
-   <position joint="finger_joint" kp="100" kv="100" ctrlrange="0 0.7"/>
+   <position joint="joint_1" name="joint_1" ctrlrange="-6.2832 6.2832" kp="5000" dampratio="3"/>
    ```
 
-   For a lighter arm (e.g., Kinova Gen3), lower values work: kp=800/kv=260 for shoulder, kp=130/kv=45 for wrist.
+   MuJoCo's `dampratio` auto-scales velocity damping based on each joint's effective inertia. This is critical because robot arms have vastly different inertias across joints (heavy shoulder vs. light wrist). With explicit `kv`, it is very easy to under-damp wrist joints, causing **high-frequency oscillation** — the joints vibrate at 3-5 rad/s around the target position even at rest. This oscillation appears as "other joints moving" during teleop and can be mistaken for a controller coupling issue.
+
+   **Recommended starting gains:**
+   - Most 6-7 DOF arms: `kp="5000" dampratio="3"` uniformly on all joints
+   - Gripper joints: `kp="100" dampratio="3"`
+   - Increase `kp` if joints are sluggish or can't track fast trajectories
+   - Increase `dampratio` if joints oscillate (try 4-5)
+   - Decrease `dampratio` if motions feel overdamped/slow (try 2)
+
+   **Do not use per-joint `kp`/`kv` tuning** unless you have a specific reason. Per-joint kv tuning requires getting the damping right for each joint's inertia independently — too low causes oscillation, too high causes sluggishness. `dampratio` handles this automatically.
 
    Set `ctrlrange` to match the joint limits from the URDF/SRDF. Remove the `forcelimited="false"` that `urdf_to_mjcf` adds by default.
 
    **`actuatorfrcrange` can cause saturation.** The `urdf_to_mjcf` tool sets `actuatorfrcrange` from the URDF's `<limit effort="...">` values. Wrist joints on smaller arms often have low effort limits (e.g., 28 Nm) that cause actuator force saturation in sim — the actuator can't apply enough force to track the commanded position, leading to joint drift and instability. **Increase `actuatorfrcrange` on wrist joints to at least ±150 Nm for simulation**, or remove the attribute entirely to allow unlimited force. The real hardware effort limits still apply on the physical config.
-
-   **Alternative: use `dampratio` instead of explicit `kv`.** MuJoCo's `dampratio` parameter auto-scales velocity damping based on joint inertia, which avoids the need to manually tune `kv` per joint. A uniform `kp=5000, dampratio=2` works well for many 6-DOF arms. This is simpler than per-joint `kv` tuning but provides less fine-grained control.
 
    **Contact exclusions** — Mirror the SRDF `disable_collisions` entries using MuJoCo `<contact><exclude>` syntax. At minimum, exclude:
    - Adjacent arm links (parent-child pairs)
@@ -281,7 +280,7 @@ The scene file includes the robot and adds the simulation environment:
   <statistic center="0.3 0 0.5" extent="1.5"/>
   <default>
     <geom solref=".004 1"/>
-    <joint damping="20"/>
+    <joint damping="50"/>
   </default>
 
   <visual>
@@ -313,7 +312,7 @@ The scene file includes the robot and adds the simulation environment:
 </mujoco>
 ```
 
-**`timestep` and `damping` are critical for stability.** The default MuJoCo timestep (0.002s) combined with high actuator gains can cause oscillation. Use `timestep="0.001"` for robot arms. The `<joint damping="20"/>` default adds velocity-proportional damping to all joints, preventing high-frequency oscillation especially on light wrist joints. Increase damping if wrist joints still oscillate; decrease if motions feel sluggish.
+**`timestep` and `damping` are critical for stability.** The default MuJoCo timestep (0.002s) combined with high actuator gains can cause oscillation. Use `timestep="0.001"` for robot arms. The `<joint damping="50"/>` default adds velocity-proportional damping to all joints, providing baseline oscillation suppression. Increase to 100 if wrist joints still oscillate; decrease to 20 if motions feel sluggish. This passive damping works alongside the actuator `dampratio` — both contribute to stability.
 
 **Keyframe values:** `qpos` and `ctrl` must have one entry per joint, in the order they appear in the MJCF body tree. Match the home pose from the SRDF `group_state`. Gripper joints are typically all 0 (open).
 
@@ -334,6 +333,18 @@ print(f'Max velocity after 1s: {max(abs(data.qvel)):.6f}')
 "
 ```
 If max velocity is near 0, the model is stable. If it's large or NaN, check actuator gains and contact exclusions.
+
+**Also verify after launching in MoveIt Pro.** The standalone MuJoCo test above runs without controllers. The full system with JTAC/JVC controllers can introduce additional dynamics. After launching, check joint stability at rest:
+```bash
+ros2 topic echo /joint_states --once
+```
+All arm joint velocities should be near 0 (< 0.01 rad/s). If velocities are 1+ rad/s while positions are near the home pose, the joints are **oscillating** — this means the actuator gains need more damping. Increase `dampratio` (try 3-5) or increase the `<joint damping="..."/>` default in scene.xml (try 50-100).
+
+**Oscillation diagnosis checklist:**
+1. High velocity (1+ rad/s) with small position error (< 0.1 rad) at rest → underdamped actuators → increase `dampratio`
+2. Large position error growing over time → actuators too weak → increase `kp`
+3. NaN in velocities → simulation diverged → check contact exclusions, reduce `kp`, increase `timestep`
+4. Joints move when jogging a single joint → likely oscillation (not controller coupling) → check velocities at rest first
 
 ## Step 5: Mesh Assets for Physics
 
@@ -565,10 +576,12 @@ If any step fails, fix the issue and re-run from the appropriate step. Do not co
 
 **`moveit_pro envfile` produces unusable output:** It dumps the entire shell environment. Instead, create a clean `.env` manually with only the `MOVEIT_*` variables (see the doosan_ws/.env for an example).
 
-**Path tolerance violated / Controller aborted sub-trajectory:** This is the most common sim config issue. Physics sim actuators lag behind commanded positions, causing the trajectory controller to abort. Two fixes needed:
-1. **Relax path tolerance:** Create a sim-specific `config/control/<robot>_ros2_control.yaml` that sets `default_path_tolerance: 0.5` on the `joint_trajectory_admittance_controller`. This must be a **complete** copy of the base config's ros2_control yaml (not just the override) because `ros2_control.config` replaces the entire file. Add `ros2_control.config` to the sim config.yaml pointing to the new file.
-2. **Increase actuator gains:** Use `kp` + `kv` (explicit velocity damping) instead of `dampratio`. For heavy arms like the Doosan M1013: kp=4000/kv=600 for shoulder, kp=2000/kv=300 for elbow, kp=1000/kv=150 for wrist. Scale based on the `actuatorfrcrange` from the MJCF.
+**Joints oscillating at rest / joints move when jogging a single joint:** The most common sim config issue. Symptoms: joint velocities are 1-5+ rad/s while positions are near the target, or moving one joint during teleop causes other joints to vibrate. Cause: actuator velocity damping is too low relative to stiffness, especially on lightweight wrist joints. **Fix:** Switch from explicit `kp`/`kv` to `kp`/`dampratio`. Use `kp="5000" dampratio="3"` uniformly on all joints. The `dampratio` auto-scales damping per joint inertia, preventing the underdamping that manual `kv` tuning causes on light joints. Also increase passive joint damping in scene.xml defaults (`<joint damping="50"/>`). **Always check joint velocities at rest after launching** (`ros2 topic echo /joint_states --once`) — if any arm joint velocity exceeds 0.01 rad/s, the actuators need more damping.
 
-**Simulation unstable / joints exploding:** Lower `kp` values or increase `kv`. Ensure contact exclusions cover all adjacent link pairs. Check that `gravcomp="1"` is set on all bodies (urdf_to_mjcf does this automatically).
+**Path tolerance violated / Controller aborted sub-trajectory:** Physics sim actuators lag behind commanded positions, causing the trajectory controller to abort. Two fixes needed:
+1. **Relax path tolerance:** Create a sim-specific `config/control/<robot>_ros2_control.yaml` that sets `default_path_tolerance: 1.0` on the `joint_trajectory_admittance_controller`. This must be a **complete** copy of the base config's ros2_control yaml (not just the override) because `ros2_control.config` replaces the entire file. Add `ros2_control.config` to the sim config.yaml pointing to the new file.
+2. **If still failing after path tolerance:** Check actuator gains — the joints may not be tracking accurately enough. Increase `kp` (try 8000-10000) while keeping `dampratio` at 3+.
+
+**Simulation unstable / joints exploding:** Ensure contact exclusions cover all adjacent link pairs. Check that `gravcomp="1"` is set on all bodies (urdf_to_mjcf does this automatically). If using explicit `kv`, switch to `dampratio`. Increase `timestep` if needed (try 0.0005).
 
 **Gripper passive joints drifting:** This is normal for the Robotiq 140 mimic joints in MuJoCo — the finger linkage isn't perfectly constrained without MuJoCo equality constraints. Small drift (<0.1 rad) is acceptable. For tighter coupling, add `<equality><joint>` constraints in the MJCF.
