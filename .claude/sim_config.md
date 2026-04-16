@@ -349,6 +349,118 @@ If meshes are too dense for simulation performance, decimate them:
 ros2 run moveit_studio_utils_py decimate_mesh input.stl output.stl --ratio 0.5
 ```
 
+## Step 5b: Simulated Depth Camera
+
+To add a simulated depth camera to the MuJoCo model, add a `<camera>` element and a corresponding `<site>` for the optical frame. See the [official docs](https://docs.picknik.ai/how_to/configuration_tutorials/create_robot_sim_config/migrate_to_mujoco_config/#simulated-depth-camera-sensor) for reference.
+
+### Computing the camera orientation
+
+**Do not manually reason through nested quaternion/euler transform chains.** This is error-prone and wastes iteration cycles. Instead, compute the camera orientation programmatically:
+
+```python
+# Inside a container with the sim config installed:
+import mujoco
+import numpy as np
+
+model = mujoco.MjModel.from_xml_path('scene.xml')
+data = mujoco.MjData(model)
+mujoco.mj_resetDataKeyframe(model, data, 0)
+mujoco.mj_forward(model, data)
+
+# Get body positions/orientations at the home pose
+cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, '<camera_body>')
+tip_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, '<tool_tip_body>')
+
+cam_pos = data.xpos[cam_id]
+tip_pos = data.xpos[tip_id]
+cam_rot = data.xmat[cam_id].reshape(3, 3)
+
+# Look direction: camera toward tool tip, in camera body frame
+look_world = (tip_pos - cam_pos)
+look_world = look_world / np.linalg.norm(look_world)
+look_body = cam_rot.T @ look_world
+
+# Up direction: world +Z projected into camera body frame
+up_body = cam_rot.T @ np.array([0, 0, 1])
+
+# Compute camera axes
+look = look_body / np.linalg.norm(look_body)
+y_cam = up_body - np.dot(up_body, look) * look
+y_cam = y_cam / np.linalg.norm(y_cam)
+x_cam = np.cross(look, y_cam)
+
+print(f'xyaxes="{x_cam[0]:.4f} {x_cam[1]:.4f} {x_cam[2]:.4f} {y_cam[0]:.4f} {y_cam[1]:.4f} {y_cam[2]:.4f}"')
+```
+
+### Camera and optical frame placement
+
+The camera and optical frame site go inside the camera's parent body in the MJCF:
+
+```xml
+<body name="<camera_link>" ...>
+  <!-- Camera: xyaxes defines right (X) and up (Y). Camera looks along -Z. -->
+  <camera name="<camera_name>"
+    pos="<offset_x> <offset_y> <offset_z>"
+    fovy="<vertical_fov_degrees>"
+    resolution="<width> <height>"
+    xyaxes="<x1> <x2> <x3> <y1> <y2> <y3>"
+    user="<depth_type> <fov_x_degrees> <range_min> <range_max>"/>
+  <!-- Optical frame: SAME xyaxes but Y-axis NEGATED (180 deg rotation about X for ROS convention) -->
+  <site name="<camera_name>_optical_frame"
+    pos="<offset_x> <offset_y> <offset_z>"
+    xyaxes="<x1> <x2> <x3> <-y1> <-y2> <-y3>"/>
+</body>
+```
+
+**User parameters** (set via the `user` attribute):
+- `user[0]` — depth type: `0` = RGB + Depth (most common), `1` = RGB only, `2` = 3D lidar
+- `user[1]` — horizontal FOV in degrees
+- `user[2]` — minimum range in meters
+- `user[3]` — maximum range in meters
+
+**Published ROS topics** (automatic, based on camera name):
+- `/<camera_name>/color` — RGB image
+- `/<camera_name>/depth` — depth image
+- `/<camera_name>/points` — point cloud
+- `/<camera_name>/camera_info` — camera intrinsics
+
+### Critical: camera occlusion by robot geometry
+
+The URDF camera mount point is often physically **inside** the robot mesh. The camera link origin may be behind or within the end effector housing. If the camera feed shows only white/blank, the camera is inside geometry.
+
+**Fix:** Offset the camera position along the look direction in the `pos` attribute. The offset distance should be at least the distance from the camera link origin to the front of the end effector. Compute this from FK data — check the distance between the camera body and the tool tip body. Start with a generous offset and pull back if needed.
+
+**A white/blank camera feed almost always means the camera is inside robot geometry.**
+
+### Optical frame convention
+
+Per the [MoveIt Pro docs](https://docs.picknik.ai/how_to/configuration_tutorials/create_robot_sim_config/migrate_to_mujoco_config/#simulated-depth-camera-sensor): the optical frame site must have the **Y-axis negated** compared to the camera's xyaxes. This applies the 180° rotation about X that converts from MuJoCo camera convention to ROS optical frame convention (Z forward, X right, Y down).
+
+Example:
+```xml
+<!-- Camera -->
+<camera ... xyaxes="-0.607 -0.795 0.000 0.555 -0.424 0.715"/>
+<!-- Optical frame: same X-axis, negated Y-axis -->
+<site   ... xyaxes="-0.607 -0.795 0.000 -0.555 0.424 -0.715"/>
+```
+
+### Take Snapshot objective
+
+To capture a point cloud from the simulated camera and display it in the UI:
+
+```xml
+<Action ID="GetPointCloud"
+  topic_name="/<camera_name>/points"
+  message_out="{point_cloud}"
+  publisher_timeout_sec="5.0"
+  message_timeout_sec="5.0"/>
+<Action ID="SendPointCloudToUI"
+  point_cloud="{point_cloud}"
+  pcd_topic="/pcd_pointcloud_captures"/>
+```
+
+`GetPointCloud` subscribes to the camera's point cloud topic. `SendPointCloudToUI` converts it to PCD format for the web UI. Optionally add `UpdatePlanningSceneService` to feed the point cloud into the collision octomap (requires `PointCloudServiceOctomapUpdater` plugin in sensors_3d.yaml).
+
 ## Step 6: Sim-Specific Objectives
 
 **`objectives/reset_simulation.xml`** — resets the sim to the default MuJoCo keyframe:
