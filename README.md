@@ -1,5 +1,7 @@
 # DETPRECATED Robot Configuration Setup
 
+https://github.com/PickNikRoboticsServices/bloodhound
+
 Functionality moved to Bloodhound.
 
 Guides and tooling for building MoveIt Pro robot configuration packages, designed to be used by Claude Code agents and human engineers.
