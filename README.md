@@ -1,4 +1,4 @@
-# DETPRECATED Robot Configuration Setup
+# DEPRECATED Robot Configuration Setup
 
 https://github.com/PickNikRoboticsServices/bloodhound
 
